@@ -43,6 +43,17 @@ def build_feature_rows(track: dict, horses: list[dict]) -> pd.DataFrame:
 MODEL_PATH = Path("models/best_model_calibrated.joblib")
 if not MODEL_PATH.exists():
     MODEL_PATH = Path("models/best_model.joblib")
+
+from sklearn.compose import _column_transformer
+
+if not hasattr(_column_transformer, "_RemainderColsList"):
+    class _RemainderColsList(list):
+        """Dummy placeholder needed only to unpickle old ColumnTransformer objects."""
+        pass
+
+    # register the dummy on the module so pickle can find it
+    _column_transformer._RemainderColsList = _RemainderColsList
+    
 pipe = joblib.load(MODEL_PATH)
 
 # Collect inputs

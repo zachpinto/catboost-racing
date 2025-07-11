@@ -41,6 +41,23 @@ if not MODEL_PATH.exists():
 
 pipe = joblib.load(MODEL_PATH)
 
+# ---- patch old ColumnTransformer objects so they run on sklearn 1.4.x ------
+from sklearn.compose import ColumnTransformer
+
+def _patch_ct(ct: ColumnTransformer):
+    """
+    Recursively add the private attrs that did not exist in older
+    scikit-learn versions shipped with Python 3.12 on Streamlit Cloud.
+    """
+    if not hasattr(ct, "_name_to_fitted_passthrough"):
+        ct._name_to_fitted_passthrough = {}
+
+    # Patch nested transformers (e.g. inside pipelines)
+    for _, trans, _ in ct.transformers:
+        if isinstance(trans, ColumnTransformer):
+            _patch_ct(trans)
+
+_patch_ct(pipe.named_steps.get("preproc", pipe))   # or just _patch_ct(pipe) if unsure
 # ----------------------------------------------------------------
 # 2. Helper – convert UI dictionaries to model-ready rows
 # ----------------------------------------------------------------

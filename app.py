@@ -1,17 +1,55 @@
-import streamlit as st
-import pandas as pd
-import numpy as np
-import joblib
-from pathlib import Path
-import math
+# app.py  ---------------------------------------------------------
+# Python 3.12  |  Streamlit Cloud runtime
 
-# Helper functions
+# ----------------------------------------------------------------
+# standard / third-party imports
+# ----------------------------------------------------------------
+import sys, math
+from pathlib import Path
+
+import pandas as pd
+import numpy  as np
+import streamlit as st
+import joblib
+
+# ----------------------------------------------------------------
+# 🔧  shim for old scikit-learn pickles
+# ----------------------------------------------------------------
+# The model was trained with scikit-learn ≥1.6, which stores a reference to
+#   sklearn.compose._column_transformer._RemainderColsList
+# That private helper disappeared in 1.4 (the version available for Py 3.12
+# on Streamlit Cloud).  We register a dummy class under the expected name
+# *before* unpickling.
+
+mod_name = "sklearn.compose._column_transformer"
+mod = __import__(mod_name, fromlist=["dummy"])
+
+if "_RemainderColsList" not in mod.__dict__:
+    class _RemainderColsList(list):
+        """Placeholder needed only to un-pickle old ColumnTransformer objects."""
+        pass
+
+    mod._RemainderColsList = _RemainderColsList
+    sys.modules[mod_name] = mod   # make absolutely sure pickle can find it
+
+# ----------------------------------------------------------------
+# 1. Load fitted pipeline
+# ----------------------------------------------------------------
+MODEL_PATH = Path("models/best_model_calibrated.joblib")
+if not MODEL_PATH.exists():
+    MODEL_PATH = Path("models/best_model.joblib")
+
+pipe = joblib.load(MODEL_PATH)
+
+# ----------------------------------------------------------------
+# 2. Helper – convert UI dictionaries to model-ready rows
+# ----------------------------------------------------------------
 def build_feature_rows(track: dict, horses: list[dict]) -> pd.DataFrame:
     rows = []
     for h in horses:
-        dec_odds = max(h["odds"], 1.01)            # protect against ≤1
+        dec_odds = max(h["odds"], 1.01)          # protect against ≤1
         rows.append({
-            # race‑level
+            # race-level
             "ncond": track["surface"],
             "class": track["race_class"],
             "metric": track["distance"],
@@ -39,25 +77,11 @@ def build_feature_rows(track: dict, horses: list[dict]) -> pd.DataFrame:
         })
     return pd.DataFrame(rows)
 
-# Load model
-MODEL_PATH = Path("models/best_model_calibrated.joblib")
-if not MODEL_PATH.exists():
-    MODEL_PATH = Path("models/best_model.joblib")
-
-from sklearn.compose import _column_transformer
-
-if not hasattr(_column_transformer, "_RemainderColsList"):
-    class _RemainderColsList(list):
-        """Dummy placeholder needed only to unpickle old ColumnTransformer objects."""
-        pass
-
-    # register the dummy on the module so pickle can find it
-    _column_transformer._RemainderColsList = _RemainderColsList
-    
-pipe = joblib.load(MODEL_PATH)
-
-# Collect inputs
-st.title("Horse‑race Win Probability Model")
+# ----------------------------------------------------------------
+# 3. Streamlit UI
+# ----------------------------------------------------------------
+st.set_page_config(page_title="Horse-race Win Model", layout="centered")
+st.title("Horse-race Win Probability Model")
 
 with st.form("race_form"):
     st.header("Race information")
@@ -67,25 +91,25 @@ with st.form("race_form"):
     n_runners   = st.number_input("Field size (Press Enter to confirm)", 2, 20, 8)
 
     st.header("Horse entries")
-    horses = []
+    horses: list[dict] = []
     for i in range(1, n_runners + 1):
         with st.expander(f"Horse {i}", expanded=(i == 1)):
             age    = st.number_input("Age", 2, 15, 4, key=f"age{i}")
             weight = st.number_input("Weight kg", 40.0, 70.0, 55.0, key=f"wt{i}")
-            odds   = st.number_input("Morning‑line odds (decimal)", 1.01, 99.9, 5.0, key=f"odds{i}")
+            odds   = st.number_input("Morning-line odds (decimal)", 1.01, 99.9, 5.0, key=f"odds{i}")
 
-            st.markdown("*Recent form — use 40 for DNF*")
+            st.markdown("*Recent form — use 40 for DNF*")
             f1   = st.number_input("Last finish", 1, 40, 3, key=f"f1{i}")
             f2   = st.number_input("Two back",    1, 40, 5, key=f"f2{i}")
             f3   = st.number_input("Three back",  1, 40, 2, key=f"f3{i}")
-            wins6= st.number_input("Wins last 6", 0, 6, 1, key=f"w6{i}")
+            wins6= st.number_input("Wins last 6", 0, 6, 1, key=f"w6{i}")
             dsl  = st.number_input("Days since last", 1, 400, 30, key=f"dsl{i}")
 
             course_runs = st.number_input("Runs on this surface", 0, 50, 3, key=f"cr{i}")
             dist_runs   = st.number_input("Runs at this dist",    0, 50, 4, key=f"dr{i}")
 
-            j_wr = st.number_input("Jockey win‑rate (0‑1)", 0.0, 1.0, 0.10, 0.01, key=f"jwr{i}")
-            t_wr = st.number_input("Trainer win‑rate (0‑1)", 0.0, 1.0, 0.12, 0.01, key=f"twr{i}")
+            j_wr = st.number_input("Jockey win-rate (0-1)", 0.0, 1.0, 0.10, 0.01, key=f"jwr{i}")
+            t_wr = st.number_input("Trainer win-rate (0-1)", 0.0, 1.0, 0.12, 0.01, key=f"twr{i}")
             j_new = st.checkbox("Unknown jockey", key=f"jun{i}")
             t_new = st.checkbox("Unknown trainer", key=f"tun{i}")
 
@@ -98,7 +122,9 @@ with st.form("race_form"):
 
     submitted = st.form_submit_button("Predict")
 
-# Prediction & display
+# ----------------------------------------------------------------
+# 4. Prediction & display
+# ----------------------------------------------------------------
 if submitted:
     track = dict(surface=surface, distance=distance, race_class=race_class)
     X_new = build_feature_rows(track, horses)
